@@ -10,6 +10,7 @@ import chromadb
 import voyageai
 from pypdf import PdfReader
 from docx import Document
+from openpyxl import load_workbook
 
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY")
 CHROMA_PATH = os.environ.get("CHROMA_PATH", "./chroma_db")
@@ -43,6 +44,43 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
     return text
 
 
+def extract_text_from_xlsx(file_bytes: bytes) -> str:
+    """解析Excel，按工作表逐行提取单元格内容"""
+    wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
+    text_parts = []
+    for sheet in wb.worksheets:
+        text_parts.append(f"【工作表: {sheet.title}】")
+        for row in sheet.iter_rows(values_only=True):
+            cells = [str(c) for c in row if c is not None and str(c).strip() != ""]
+            if cells:
+                text_parts.append(" | ".join(cells))
+    return "\n".join(text_parts)
+
+
+def extract_text_from_txt(file_bytes: bytes) -> str:
+    for enc in ("utf-8", "gbk", "gb2312"):
+        try:
+            return file_bytes.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return file_bytes.decode("utf-8", errors="ignore")
+
+
+def extract_text_any(filename: str, file_bytes: bytes) -> str:
+    """根据文件名后缀解析文本内容，不做切分/向量化"""
+    name = filename.lower()
+    if name.endswith(".pdf"):
+        return extract_text_from_pdf(file_bytes)
+    elif name.endswith(".docx"):
+        return extract_text_from_docx(file_bytes)
+    elif name.endswith((".xlsx", ".xlsm")):
+        return extract_text_from_xlsx(file_bytes)
+    elif name.endswith(".txt"):
+        return extract_text_from_txt(file_bytes)
+    else:
+        raise ValueError("仅支持 .pdf、.docx、.xlsx、.txt 文件")
+
+
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list:
     """按字符数切分文本，保留一定重叠，避免上下文断裂"""
     text = text.strip()
@@ -74,12 +112,7 @@ def ingest_document(filename: str, file_bytes: bytes, metadata: dict = None) -> 
     """
     metadata = metadata or {}
 
-    if filename.lower().endswith(".pdf"):
-        text = extract_text_from_pdf(file_bytes)
-    elif filename.lower().endswith(".docx"):
-        text = extract_text_from_docx(file_bytes)
-    else:
-        raise ValueError("仅支持 .pdf 和 .docx 文件")
+    text = extract_text_any(filename, file_bytes)
 
     chunks = chunk_text(text)
     if not chunks:

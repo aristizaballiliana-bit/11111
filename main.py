@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from anthropic import Anthropic
 
-from ingest import ingest_document, query_knowledge_base, list_documents, delete_document
+from ingest import ingest_document, query_knowledge_base, list_documents, delete_document, extract_text_any
 
 app = FastAPI(title="医美社媒运营 Agent")
 
@@ -135,8 +135,8 @@ def remove_document(filename: str):
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """上传 Word/PDF 文档到知识库"""
-    if not file.filename.lower().endswith((".pdf", ".docx")):
-        raise HTTPException(status_code=400, detail="仅支持 .pdf 或 .docx 文件")
+    if not file.filename.lower().endswith((".pdf", ".docx", ".xlsx", ".xlsm", ".txt")):
+        raise HTTPException(status_code=400, detail="仅支持 .pdf、.docx、.xlsx、.txt 文件")
 
     content = await file.read()
     try:
@@ -144,6 +144,38 @@ async def upload_file(file: UploadFile = File(...)):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/extract")
+async def extract_file(file: UploadFile = File(...), save_to_kb: bool = False):
+    """
+    提取上传文件的文本内容，用于本次对话上下文。
+    save_to_kb=true 时同时存入知识库（向量化）。
+    """
+    content = await file.read()
+    try:
+        text = extract_text_any(file.filename, content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    kb_result = None
+    if save_to_kb:
+        try:
+            kb_result = ingest_document(file.filename, content)
+        except Exception as e:
+            kb_result = {"error": str(e)}
+
+    # 避免一次性塞入过长文本，做截断保护（约12000字符）
+    truncated = len(text) > 12000
+    if truncated:
+        text = text[:12000]
+
+    return {
+        "filename": file.filename,
+        "text": text,
+        "truncated": truncated,
+        "kb_result": kb_result,
+    }
 
 
 @app.post("/chat")
