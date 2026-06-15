@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>医美社媒运营助手</title>
+<style>
+  :root {
+    --ink: #1c2b2d;
+    --paper: #f6f4ef;
+    --line: #d8d3c6;
+    --accent: #b8754a;
+    --accent-soft: #ead9ca;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --serif: 'Source Serif Pro', Georgia, serif;
+    --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    background: var(--paper);
+    color: var(--ink);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    border-right: 1px solid var(--line);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: #fbfaf6;
+  }
+
+  .brand {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 12px;
+  }
+
+  .brand small {
+    display: block;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 400;
+    color: #8a8378;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  .kb-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #8a8378;
+    margin: 0 0 10px 0;
+    font-weight: 600;
+  }
+
+  .upload-box {
+    border: 1.5px dashed var(--line);
+    border-radius: 6px;
+    padding: 16px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    font-size: 13px;
+    color: #6b6458;
+  }
+  .upload-box:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .upload-box input { display: none; }
+
+  .doc-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .doc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12.5px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .doc-item span.name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+  }
+  .doc-item button {
+    border: none;
+    background: none;
+    color: #b56a5a;
+    cursor: pointer;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .doc-item button:hover { text-decoration: underline; }
+
+  .upload-status {
+    font-size: 12px;
+    color: var(--accent);
+    min-height: 16px;
+  }
+
+  .meta-note {
+    margin-top: auto;
+    font-size: 11px;
+    color: #a39b8c;
+    line-height: 1.6;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+
+  /* ---------- Main / Chat ---------- */
+  .main {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  .chat-window {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .msg {
+    max-width: 720px;
+    line-height: 1.7;
+    font-size: 14.5px;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 16px;
+    border-radius: 10px 10px 2px 10px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    padding: 4px 0;
+  }
+  .msg.assistant::before {
+    content: '助手';
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+  .msg.assistant .sources {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: #a39b8c;
+    font-family: var(--mono);
+  }
+  .msg pre, .msg code {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 13px;
+  }
+  .msg table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+  .msg th, .msg td {
+    border: 1px solid var(--line);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .msg th { background: var(--accent-soft); }
+
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: #a39b8c;
+    max-width: 480px;
+  }
+  .empty-state h2 {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+  .empty-state p { font-size: 13.5px; line-height: 1.7; }
+
+  .loading-dots::after {
+    content: '·';
+    animation: dots 1.2s steps(3, end) infinite;
+  }
+  @keyframes dots {
+    0%, 20% { content: '·'; }
+    40% { content: '··'; }
+    60%, 100% { content: '···'; }
+  }
+
+  /* ---------- Input bar ---------- */
+  .input-bar {
+    border-top: 1px solid var(--line);
+    padding: 16px 48px 24px;
+    background: var(--paper);
+  }
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: var(--sans);
+    background: #fff;
+    color: var(--ink);
+    min-height: 46px;
+    max-height: 160px;
+    line-height: 1.5;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .send-btn {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: 8px;
+    padding: 12px 22px;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .send-btn:hover { background: var(--accent); }
+  .send-btn:disabled { background: var(--line); cursor: not-allowed; }
+
+  .attach-btn {
+    flex-shrink: 0;
+    width: 46px;
+    height: 46px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 18px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .attach-btn:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .attach-btn.has-file {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .attached-name {
+    font-family: var(--mono);
+    color: var(--accent);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .input-options {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #8a8378;
+  }
+  .input-options label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      医美社媒运营助手
+      <small>Knowledge Base · Agent</small>
+    </div>
+
+    <div class="kb-section">
+      <h3>产品资料库</h3>
+      <label class="upload-box" id="uploadBox">
+        点击或拖拽上传 Word / PDF / Excel
+        <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm" multiple />
+      </label>
+      <div class="upload-status" id="uploadStatus"></div>
+      <ul class="doc-list" id="docList"></ul>
+    </div>
+
+    <div class="meta-note">
+      上传产品资料后即可作为知识库引用。<br/>
+      对话中可直接提问选题创意或产品信息，模型会自动检索相关资料 + 联网搜索热点。
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="chat-window" id="chatWindow">
+      <div class="empty-state" id="emptyState">
+        <h2>开始一次对话</h2>
+        <p>例如：「2C方向，给我3个公众号选题」或「这款设备的注册证适用范围是什么」</p>
+      </div>
+    </div>
+
+    <div class="input-bar">
+      <div class="input-row">
+        <label class="attach-btn" id="attachBtn" title="上传文案/素材稿到本次对话">
+          📎
+          <input type="file" id="attachInput" accept=".pdf,.docx,.xlsx,.xlsm,.txt" style="display:none" />
+        </label>
+        <textarea id="messageInput" placeholder="输入你的需求…" rows="1"></textarea>
+        <button class="send-btn" id="sendBtn">发送</button>
+      </div>
+      <div class="input-options">
+        <label><input type="checkbox" id="webSearchToggle" checked /> 联网搜索热点</label>
+        <label><input type="checkbox" id="saveToKbToggle" /> 同时存入知识库</label>
+        <span id="attachedFileName" class="attached-name"></span>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+const chatWindow = document.getElementById('chatWindow');
+const emptyState = document.getElementById('emptyState');
+const messageInput = document.getElementById('messageInput');
+const sendBtn = document.getElementById('sendBtn');
+const fileInput = document.getElementById('fileInput');
+const uploadStatus = document.getElementById('uploadStatus');
+const docList = document.getElementById('docList');
+const webSearchToggle = document.getElementById('webSearchToggle');
+const attachBtn = document.getElementById('attachBtn');
+const attachInput = document.getElementById('attachInput');
+const attachedFileName = document.getElementById('attachedFileName');
+const saveToKbToggle = document.getElementById('saveToKbToggle');
+
+let history = [];
+let pendingAttachment = null; // { filename, text, truncated }
+
+// ---------- Auto-resize textarea ----------
+messageInput.addEventListener('input', () => {
+  messageInput.style.height = 'auto';
+  messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + 'px';
+});
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+sendBtn.addEventListener('click', sendMessage);
+
+// ---------- Chat ----------
+function addMessage(role, text, sources) {
+  emptyState.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = renderMarkdown(text);
+
+  if (sources && sources.length > 0) {
+    const srcDiv = document.createElement('div');
+    srcDiv.className = 'sources';
+    srcDiv.textContent = '参考资料: ' + [...new Set(sources)].join(', ');
+    div.appendChild(srcDiv);
+  }
+
+  chatWindow.appendChild(div);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+  return div;
+}
+
+function renderMarkdown(text) {
+  // 轻量 markdown 渲染：标题、粗体、列表、表格、换行
+  let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^### (.*$)/gim, '<h4>$1</h4>')
+    .replace(/^## (.*$)/gim, '<h3>$1</h3>')
+    .replace(/^# (.*$)/gim, '<h2>$1</h2>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.*$)/gim, '<li>$1</li>')
+    .replace(/\n/g, '<br/>');
+  return html;
+}
+
+async function sendMessage() {
+  const text = messageInput.value.trim();
+  if (!text && !pendingAttachment) return;
+
+  let displayText = text;
+  let payloadText = text;
+
+  if (pendingAttachment) {
+    displayText = `${text}\n\n📎 附件: ${pendingAttachment.filename}`;
+    payloadText = `${text}\n\n# 附件内容（来自 ${pendingAttachment.filename}）\n${pendingAttachment.text}`;
+  }
+
+  addMessage('user', displayText || '（仅上传附件）');
+  history.push({ role: 'user', content: payloadText || '请分析这份附件内容' });
+  messageInput.value = '';
+  messageInput.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  // 清除附件状态
+  pendingAttachment = null;
+  attachBtn.classList.remove('has-file');
+  attachedFileName.textContent = '';
+
+  const loadingDiv = addMessage('assistant', '<span class="loading-dots">思考中</span>');
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: payloadText || '请分析这份附件内容',
+        history: history.slice(0, -1), // 不重复发送当前消息
+        use_web_search: webSearchToggle.checked,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '请求失败');
+    }
+
+    const data = await res.json();
+    loadingDiv.innerHTML = renderMarkdown(data.reply);
+    if (data.kb_sources && data.kb_sources.length > 0) {
+      const srcDiv = document.createElement('div');
+      srcDiv.className = 'sources';
+      srcDiv.textContent = '参考资料: ' + [...new Set(data.kb_sources)].join(', ');
+      loadingDiv.appendChild(srcDiv);
+    }
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (e) {
+    loadingDiv.innerHTML = `<span style="color:#b56a5a;">出错了: ${e.message}</span>`;
+  } finally {
+    sendBtn.disabled = false;
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+}
+
+// ---------- Chat attachment ----------
+attachInput.addEventListener('change', async () => {
+  const file = attachInput.files[0];
+  if (!file) return;
+
+  attachedFileName.textContent = `正在解析 ${file.name} ...`;
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch(`/extract?save_to_kb=${saveToKbToggle.checked}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '解析失败');
+    }
+    const data = await res.json();
+    pendingAttachment = data;
+    attachBtn.classList.add('has-file');
+    attachedFileName.textContent = `已附加: ${file.name}${data.truncated ? '（已截断）' : ''}`;
+    if (saveToKbToggle.checked) {
+      attachedFileName.textContent += data.kb_result && !data.kb_result.error
+        ? '，已存入知识库'
+        : '';
+      loadDocuments();
+    }
+  } catch (e) {
+    attachedFileName.textContent = `解析失败: ${e.message}`;
+    pendingAttachment = null;
+  }
+  attachInput.value = '';
+});
+
+
+fileInput.addEventListener('change', async () => {
+  const files = Array.from(fileInput.files);
+  for (const file of files) {
+    uploadStatus.textContent = `正在上传 ${file.name} ...`;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || '上传失败');
+      }
+      const data = await res.json();
+      uploadStatus.textContent = `${file.name} 已导入，共 ${data.chunks_added} 段`;
+    } catch (e) {
+      uploadStatus.textContent = `${file.name} 上传失败: ${e.message}`;
+    }
+  }
+  fileInput.value = '';
+  loadDocuments();
+});
+
+// ---------- Document list ----------
+async function loadDocuments() {
+  try {
+    const res = await fetch('/documents');
+    const data = await res.json();
+    docList.innerHTML = '';
+    (data.documents || []).forEach((name) => {
+      const li = document.createElement('li');
+      li.className = 'doc-item';
+      li.innerHTML = `<span class="name">${name}</span><button data-name="${name}">删除</button>`;
+      docList.appendChild(li);
+    });
+    docList.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.name;
+        await fetch(`/documents/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        loadDocuments();
+      });
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+loadDocuments();
+</script>
+</body>
+</html>
