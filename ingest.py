@@ -11,6 +11,7 @@ import voyageai
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
+from pptx import Presentation
 
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY")
 CHROMA_PATH = os.environ.get("CHROMA_PATH", "./chroma_db")
@@ -66,6 +67,32 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
     return file_bytes.decode("utf-8", errors="ignore")
 
 
+def extract_text_from_pptx(file_bytes: bytes) -> str:
+    """解析PPT，按幻灯片提取文本框/表格内容及备注"""
+    prs = Presentation(io.BytesIO(file_bytes))
+    text_parts = []
+    for i, slide in enumerate(prs.slides, start=1):
+        slide_texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    line = "".join(run.text for run in para.runs)
+                    if line.strip():
+                        slide_texts.append(line.strip())
+            if shape.has_table:
+                for row in shape.table.rows:
+                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if cells:
+                        slide_texts.append(" | ".join(cells))
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame.text
+            if notes.strip():
+                slide_texts.append(f"[备注] {notes.strip()}")
+        if slide_texts:
+            text_parts.append(f"【幻灯片 {i}】\n" + "\n".join(slide_texts))
+    return "\n\n".join(text_parts)
+
+
 def extract_text_any(filename: str, file_bytes: bytes) -> str:
     """根据文件名后缀解析文本内容，不做切分/向量化"""
     name = filename.lower()
@@ -75,10 +102,12 @@ def extract_text_any(filename: str, file_bytes: bytes) -> str:
         return extract_text_from_docx(file_bytes)
     elif name.endswith((".xlsx", ".xlsm")):
         return extract_text_from_xlsx(file_bytes)
+    elif name.endswith(".pptx"):
+        return extract_text_from_pptx(file_bytes)
     elif name.endswith(".txt"):
         return extract_text_from_txt(file_bytes)
     else:
-        raise ValueError("仅支持 .pdf、.docx、.xlsx、.txt 文件")
+        raise ValueError("仅支持 .pdf、.docx、.xlsx、.pptx、.txt 文件")
 
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list:
@@ -171,6 +200,3 @@ def delete_document(filename: str) -> dict:
     if ids_to_delete:
         collection.delete(ids=ids_to_delete)
     return {"filename": filename, "deleted_chunks": len(ids_to_delete)}
-    extract_text_from_pptx
-    extract_text_any
-
