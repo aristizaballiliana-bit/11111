@@ -1,585 +1,245 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>医美社媒运营助手</title>
-<style>
-  :root {
-    --ink: #1c2b2d;
-    --paper: #f6f4ef;
-    --line: #d8d3c6;
-    --accent: #b8754a;
-    --accent-soft: #ead9ca;
-    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-    --serif: 'Source Serif Pro', Georgia, serif;
-    --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  }
+"""
+main.py
+FastAPI 主服务：
+- 提供文档上传接口（写入知识库）
+- 提供对话接口（检索知识库 + 联网搜索 + 调用 Claude API）
+- 提供静态前端页面
+"""
 
-  * { box-sizing: border-box; }
+import os
+import json
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from anthropic import Anthropic
 
-  body {
-    margin: 0;
-    font-family: var(--sans);
-    background: var(--paper);
-    color: var(--ink);
-    height: 100vh;
-    overflow: hidden;
-  }
+from ingest import ingest_document, query_knowledge_base, list_documents, delete_document, extract_text_any
 
-  .layout {
-    display: grid;
-    grid-template-columns: 280px 1fr;
-    height: 100vh;
-  }
+app = FastAPI(title="医美社媒运营 Agent")
 
-  /* ---------- Sidebar ---------- */
-  .sidebar {
-    border-right: 1px solid var(--line);
-    padding: 24px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    background: #fbfaf6;
-  }
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-  .brand {
-    font-family: var(--serif);
-    font-size: 19px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    border-bottom: 2px solid var(--accent);
-    padding-bottom: 12px;
-  }
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
-  .brand small {
-    display: block;
-    font-family: var(--sans);
-    font-size: 11px;
-    font-weight: 400;
-    color: #8a8378;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    margin-top: 4px;
-  }
+SYSTEM_PROMPT = """# 角色设定
+你是「医美/医疗器械社媒运营助手」，服务对象是品牌方/运营人员本人。你的核心任务是基于产品资料，结合当下热点/季节特点，输出公众号和视频号的内容创意。
 
-  .kb-section h3 {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: #8a8378;
-    margin: 0 0 10px 0;
-    font-weight: 600;
-  }
+# 工作模式判断
+每次对话先判断用户意图属于：
+- 【模块一】要选题/创意 → 走"热点+创意"流程
+- 【模块二】查产品信息/文案规范/合规要点 → 直接基于知识库回答
 
-  .upload-btn {
-    display: block;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 10px 12px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-    font-size: 12.5px;
-    color: var(--ink);
-    background: #fff;
-  }
-  .upload-btn:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .upload-btn input { display: none; }
+如未说明2B（机构/医生/经销商）还是2C（消费者）方向，先询问。
 
-  .doc-list {
-    list-style: none;
-    margin: 12px 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 280px;
-    overflow-y: auto;
-  }
-  .doc-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12.5px;
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 6px 10px;
-    gap: 8px;
-  }
-  .doc-item span.name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--mono);
-  }
-  .doc-item button {
-    border: none;
-    background: none;
-    color: #b56a5a;
-    cursor: pointer;
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-  .doc-item button:hover { text-decoration: underline; }
+---
 
-  .upload-status {
-    font-size: 12px;
-    color: var(--accent);
-    min-height: 16px;
-  }
+# 模块一：选题与创意建议
 
-  .meta-note {
-    margin-top: auto;
-    font-size: 11px;
-    color: #a39b8c;
-    line-height: 1.6;
-    border-top: 1px solid var(--line);
-    padding-top: 14px;
-  }
+## 流程
+1. 确认2B/2C方向
+2. 从提供的知识库片段中提取该产品的核心卖点（适应症/参数/差异化优势/适用人群）
+3. 利用联网搜索结果，结合当下热点：
+   - 2C：小红书/抖音/微博健康话题、节日节点、社会热议话题
+   - 2B：行业政策、学术会议、技术趋势、竞品动态
+4. 输出3-5个选题角度
 
-  /* ---------- Main / Chat ---------- */
-  .main {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-  }
+## 输出结构（每个选题）
+- **切入点**：热点/季节话题 + 产品结合逻辑
+- **目标受众**
+- **公众号方向**：标题建议 + 内容大纲思路（1-2句话）
+- **视频号创意**：具体呈现形式
 
-  .chat-window {
-    flex: 1;
-    overflow-y: auto;
-    padding: 32px 48px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
+## 视频号创意——专家素材二次创作专项
+素材限制为专家口播/采访类，创意聚焦剪辑包装方式，可选用以下形式（按需推荐）：
+- **金句快剪型**：剪出15-30秒高能观点句，开头用反问/数据/争议观点抓注意力，字幕高亮关键词
+- **热点嫁接型**：从专家素材中找到与当下热点相关的片段，用热点引入再接专家观点作背书
+- **问答拆解型**：长采访拆成多条"一问一答"系列，连续发布形成系列感
+- **反差/悬念开头**：用专家颠覆性结论的前半句做封面悬念，视频内解释完整逻辑
+- **数字化包装**：把口述内容提炼为"3个要点/5个误区"信息图叠加画面
+- **跨平台复用**：视频号发短视频引流，公众号发图文+逐字稿+金句卡片深度版
 
-  .msg {
-    max-width: 720px;
-    line-height: 1.7;
-    font-size: 14.5px;
-  }
-  .msg.user {
-    align-self: flex-end;
-    background: var(--ink);
-    color: var(--paper);
-    padding: 10px 16px;
-    border-radius: 10px 10px 2px 10px;
-  }
-  .msg.assistant {
-    align-self: flex-start;
-    padding: 4px 0;
-  }
-  .msg.assistant::before {
-    content: '助手';
-    display: block;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--accent);
-    letter-spacing: 0.1em;
-    margin-bottom: 6px;
-  }
-  .msg.assistant .sources {
-    margin-top: 10px;
-    font-size: 11.5px;
-    color: #a39b8c;
-    font-family: var(--mono);
-  }
-  .msg pre, .msg code {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 13px;
-  }
-  .msg table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 8px 0;
-    font-size: 13px;
-  }
-  .msg th, .msg td {
-    border: 1px solid var(--line);
-    padding: 6px 10px;
-    text-align: left;
-  }
-  .msg th { background: var(--accent-soft); }
+---
 
-  .empty-state {
-    margin: auto;
-    text-align: center;
-    color: #a39b8c;
-    max-width: 480px;
-  }
-  .empty-state h2 {
-    font-family: var(--serif);
-    font-size: 22px;
-    color: var(--ink);
-    margin-bottom: 8px;
-  }
-  .empty-state p { font-size: 13.5px; line-height: 1.7; }
+# 模块二：产品手册问答
 
-  .loading-dots::after {
-    content: '·';
-    animation: dots 1.2s steps(3, end) infinite;
-  }
-  @keyframes dots {
-    0%, 20% { content: '·'; }
-    40% { content: '··'; }
-    60%, 100% { content: '···'; }
-  }
+直接基于知识库回答，涉及2B/2C差异时分别说明：
 
-  /* ---------- Input bar ---------- */
-  .input-bar {
-    border-top: 1px solid var(--line);
-    padding: 16px 48px 24px;
-    background: var(--paper);
-  }
-  .input-row {
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-  }
-  textarea {
-    flex: 1;
-    resize: none;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 12px 14px;
-    font-size: 14px;
-    font-family: var(--sans);
-    background: #fff;
-    color: var(--ink);
-    min-height: 46px;
-    max-height: 160px;
-    line-height: 1.5;
-  }
-  textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  .send-btn {
-    background: var(--ink);
-    color: var(--paper);
-    border: none;
-    border-radius: 8px;
-    padding: 12px 22px;
-    font-size: 14px;
-    cursor: pointer;
-    font-family: var(--sans);
-    transition: background 0.15s;
-    flex-shrink: 0;
-  }
-  .send-btn:hover { background: var(--accent); }
-  .send-btn:disabled { background: var(--line); cursor: not-allowed; }
+| 类别 | 内容 |
+|---|---|
+| 产品速览 | 适应症、核心参数、注册证信息、临床数据来源 |
+| 文案规范 | 2B：专业数据驱动；2C：通俗科普种草向，避免术语堆砌 |
+| 设计风格 | 2B：专业医疗感、品牌调性；2C：轻松生活化 |
+| 视频/图文合规要点 | 见下方合规规则 |
 
-  .attach-btn {
-    flex-shrink: 0;
-    width: 46px;
-    height: 46px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 18px;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  .attach-btn:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .attach-btn.has-file {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .attached-name {
-    font-family: var(--mono);
-    color: var(--accent);
-    max-width: 240px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+---
 
-  .input-options {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #8a8378;
-  }
-  .input-options label {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-  }
-</style>
-</head>
-<body>
-<div class="layout">
+# 合规规则（按需提示，不强制每次输出）
 
-  <aside class="sidebar">
-    <div class="brand">
-      医美社媒运营助手
-      <small>Knowledge Base · Agent</small>
-    </div>
+## 2C方向（重点）
+- 严禁"根治""安全有效""无副作用"等绝对化表述
+- 不得暗示治疗效果或承诺效果对比
+- 真人案例/前后对比图需符合相关规定
+- 注意是否需展示医疗器械注册证号及适用范围
 
-    <div class="kb-section">
-      <h3>产品资料库</h3>
-      <label class="upload-btn" id="uploadBox">
-        + 上传资料(Word/PDF/Excel/PPT)
-        <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.pptx" multiple />
-      </label>
-      <div class="upload-status" id="uploadStatus"></div>
-      <ul class="doc-list" id="docList"></ul>
-    </div>
+## 2B方向
+- 涉及临床数据需标注来源
+- 机构间宣传材料与消费者端广告法适用标准不同，需判断是否属于"广告"范畴
 
-    <div class="meta-note">
-      上传产品资料后即可作为知识库引用。<br/>
-      对话中可直接提问选题创意或产品信息，模型会自动检索相关资料 + 联网搜索热点。
-    </div>
-  </aside>
+---
 
-  <main class="main">
-    <div class="chat-window" id="chatWindow">
-      <div class="empty-state" id="emptyState">
-        <h2>开始一次对话</h2>
-        <p>例如：「2C方向，给我3个公众号选题」或「这款设备的注册证适用范围是什么」</p>
-      </div>
-    </div>
+# 输出风格
+- 简洁、结构化，不啰嗦
+- 不主动提合规审核提示，除非用户主动问合规问题
+- 中文输出
+"""
 
-    <div class="input-bar">
-      <div class="input-row">
-        <label class="attach-btn" id="attachBtn" title="上传文案/素材稿到本次对话">
-          📎
-          <input type="file" id="attachInput" accept=".pdf,.docx,.xlsx,.xlsm,.pptx,.txt" style="display:none" />
-        </label>
-        <textarea id="messageInput" placeholder="输入你的需求…" rows="1"></textarea>
-        <button class="send-btn" id="sendBtn">发送</button>
-      </div>
-      <div class="input-options">
-        <label><input type="checkbox" id="webSearchToggle" checked /> 联网搜索热点</label>
-        <label><input type="checkbox" id="saveToKbToggle" /> 同时存入知识库</label>
-        <span id="attachedFileName" class="attached-name"></span>
-      </div>
-    </div>
-  </main>
 
-</div>
-<script>
-const chatWindow = document.getElementById('chatWindow');
-const emptyState = document.getElementById('emptyState');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const fileInput = document.getElementById('fileInput');
-const uploadStatus = document.getElementById('uploadStatus');
-const docList = document.getElementById('docList');
-const webSearchToggle = document.getElementById('webSearchToggle');
-const attachBtn = document.getElementById('attachBtn');
-const attachInput = document.getElementById('attachInput');
-const attachedFileName = document.getElementById('attachedFileName');
-const saveToKbToggle = document.getElementById('saveToKbToggle');
+class ChatRequest(BaseModel):
+    message: str
+    history: list = []  # [{"role": "user"/"assistant", "content": "..."}]
+    use_web_search: bool = True
 
-let history = [];
-let pendingAttachment = null; // { filename, text, truncated }
 
-// ---------- Auto-resize textarea ----------
-messageInput.addEventListener('input', () => {
-  messageInput.style.height = 'auto';
-  messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + 'px';
-});
+@app.get("/health")
+def health():
+    return {"status": "ok", "anthropic_configured": client is not None}
 
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
 
-sendBtn.addEventListener('click', sendMessage);
+@app.get("/documents")
+def get_documents():
+    """列出已上传的知识库文档"""
+    try:
+        docs = list_documents()
+        return {"documents": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-// ---------- Chat ----------
-function addMessage(role, text, sources) {
-  emptyState.style.display = 'none';
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.innerHTML = renderMarkdown(text);
 
-  if (sources && sources.length > 0) {
-    const srcDiv = document.createElement('div');
-    srcDiv.className = 'sources';
-    srcDiv.textContent = '参考资料: ' + [...new Set(sources)].join(', ');
-    div.appendChild(srcDiv);
-  }
+@app.delete("/documents/{filename}")
+def remove_document(filename: str):
+    try:
+        result = delete_document(filename)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-  chatWindow.appendChild(div);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-  return div;
-}
 
-function renderMarkdown(text) {
-  // 轻量 markdown 渲染：标题、粗体、列表、表格、换行
-  let html = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^### (.*$)/gim, '<h4>$1</h4>')
-    .replace(/^## (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^# (.*$)/gim, '<h2>$1</h2>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/^- (.*$)/gim, '<li>$1</li>')
-    .replace(/\n/g, '<br/>');
-  return html;
-}
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """上传 Word/PDF 文档到知识库"""
+    if not file.filename.lower().endswith((".pdf", ".docx", ".xlsx", ".xlsm", ".pptx", ".txt")):
+        raise HTTPException(status_code=400, detail="仅支持 .pdf、.docx、.xlsx、.pptx、.txt 文件")
 
-async function sendMessage() {
-  const text = messageInput.value.trim();
-  if (!text && !pendingAttachment) return;
+    content = await file.read()
+    try:
+        result = ingest_document(file.filename, content)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-  let displayText = text;
-  let payloadText = text;
 
-  if (pendingAttachment) {
-    displayText = `${text}\n\n📎 附件: ${pendingAttachment.filename}`;
-    payloadText = `${text}\n\n# 附件内容（来自 ${pendingAttachment.filename}）\n${pendingAttachment.text}`;
-  }
+@app.post("/extract")
+async def extract_file(file: UploadFile = File(...), save_to_kb: bool = False):
+    """
+    提取上传文件的文本内容，用于本次对话上下文。
+    save_to_kb=true 时同时存入知识库（向量化）。
+    """
+    content = await file.read()
+    try:
+        text = extract_text_any(file.filename, content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-  addMessage('user', displayText || '（仅上传附件）');
-  history.push({ role: 'user', content: payloadText || '请分析这份附件内容' });
-  messageInput.value = '';
-  messageInput.style.height = 'auto';
-  sendBtn.disabled = true;
+    kb_result = None
+    if save_to_kb:
+        try:
+            kb_result = ingest_document(file.filename, content)
+        except Exception as e:
+            kb_result = {"error": str(e)}
 
-  // 清除附件状态
-  pendingAttachment = null;
-  attachBtn.classList.remove('has-file');
-  attachedFileName.textContent = '';
+    # 避免一次性塞入过长文本，做截断保护（约12000字符）
+    truncated = len(text) > 12000
+    if truncated:
+        text = text[:12000]
 
-  const loadingDiv = addMessage('assistant', '<span class="loading-dots">思考中</span>');
-
-  try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: payloadText || '请分析这份附件内容',
-        history: history.slice(0, -1), // 不重复发送当前消息
-        use_web_search: webSearchToggle.checked,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || '请求失败');
+    return {
+        "filename": file.filename,
+        "text": text,
+        "truncated": truncated,
+        "kb_result": kb_result,
     }
 
-    const data = await res.json();
-    loadingDiv.innerHTML = renderMarkdown(data.reply);
-    if (data.kb_sources && data.kb_sources.length > 0) {
-      const srcDiv = document.createElement('div');
-      srcDiv.className = 'sources';
-      srcDiv.textContent = '参考资料: ' + [...new Set(data.kb_sources)].join(', ');
-      loadingDiv.appendChild(srcDiv);
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    """对话接口：检索知识库 + 调用 Claude（带联网搜索）"""
+    if not client:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY 未配置")
+
+    # 1. 检索知识库
+    try:
+        kb_results = query_knowledge_base(req.message, top_k=5)
+    except Exception:
+        kb_results = []
+
+    kb_context = ""
+    if kb_results:
+        kb_context = "\n\n# 知识库参考资料\n"
+        for r in kb_results:
+            kb_context += f"\n[来源: {r['source']}]\n{r['text']}\n"
+
+    # 2. 组装消息历史
+    messages = []
+    for h in req.history:
+        messages.append({"role": h["role"], "content": h["content"]})
+
+    user_content = req.message
+    if kb_context:
+        user_content = f"{req.message}\n{kb_context}"
+
+    messages.append({"role": "user", "content": user_content})
+
+    # 3. 配置工具（联网搜索）
+    tools = []
+    if req.use_web_search:
+        tools.append({"type": "web_search_20250305", "name": "web_search"})
+
+    # 4. 调用 Claude API
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+            tools=tools if tools else None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Claude API 调用失败: {str(e)}")
+
+    # 5. 提取回复文本（拼接所有 text block）
+    reply_text = ""
+    for block in response.content:
+        if block.type == "text":
+            reply_text += block.text
+
+    return {
+        "reply": reply_text,
+        "kb_sources": [r["source"] for r in kb_results],
     }
-    history.push({ role: 'assistant', content: data.reply });
-  } catch (e) {
-    loadingDiv.innerHTML = `<span style="color:#b56a5a;">出错了: ${e.message}</span>`;
-  } finally {
-    sendBtn.disabled = false;
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-  }
-}
-
-// ---------- Chat attachment ----------
-attachInput.addEventListener('change', async () => {
-  const file = attachInput.files[0];
-  if (!file) return;
-
-  attachedFileName.textContent = `正在解析 ${file.name} ...`;
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const res = await fetch(`/extract?save_to_kb=${saveToKbToggle.checked}`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || '解析失败');
-    }
-    const data = await res.json();
-    pendingAttachment = data;
-    attachBtn.classList.add('has-file');
-    attachedFileName.textContent = `已附加: ${file.name}${data.truncated ? '（已截断）' : ''}`;
-    if (saveToKbToggle.checked) {
-      attachedFileName.textContent += data.kb_result && !data.kb_result.error
-        ? '，已存入知识库'
-        : '';
-      loadDocuments();
-    }
-  } catch (e) {
-    attachedFileName.textContent = `解析失败: ${e.message}`;
-    pendingAttachment = null;
-  }
-  attachInput.value = '';
-});
 
 
-fileInput.addEventListener('change', async () => {
-  const files = Array.from(fileInput.files);
-  for (const file of files) {
-    uploadStatus.textContent = `正在上传 ${file.name} ...`;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch('/upload', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || '上传失败');
-      }
-      const data = await res.json();
-      uploadStatus.textContent = `${file.name} 已导入，共 ${data.chunks_added} 段`;
-    } catch (e) {
-      uploadStatus.textContent = `${file.name} 上传失败: ${e.message}`;
-    }
-  }
-  fileInput.value = '';
-  loadDocuments();
-});
+# 静态前端
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-// ---------- Document list ----------
-async function loadDocuments() {
-  try {
-    const res = await fetch('/documents');
-    const data = await res.json();
-    docList.innerHTML = '';
-    (data.documents || []).forEach((name) => {
-      const li = document.createElement('li');
-      li.className = 'doc-item';
-      li.innerHTML = `<span class="name">${name}</span><button data-name="${name}">删除</button>`;
-      docList.appendChild(li);
-    });
-    docList.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const name = btn.dataset.name;
-        await fetch(`/documents/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        loadDocuments();
-      });
-    });
-  } catch (e) {
-    console.error(e);
-  }
-}
 
-loadDocuments();
-</script>
-</body>
-</html>
+@app.get("/")
+def root():
+    return FileResponse("static/index.html")
