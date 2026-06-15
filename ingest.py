@@ -171,3 +171,6 @@ def delete_document(filename: str) -> dict:
     if ids_to_delete:
         collection.delete(ids=ids_to_delete)
     return {"filename": filename, "deleted_chunks": len(ids_to_delete)}
+    extract_text_from_pptx
+    extract_text_any
+
