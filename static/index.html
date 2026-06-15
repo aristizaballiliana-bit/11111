@@ -72,21 +72,23 @@
     font-weight: 600;
   }
 
-  .upload-box {
-    border: 1.5px dashed var(--line);
+  .upload-btn {
+    display: block;
+    border: 1px solid var(--line);
     border-radius: 6px;
-    padding: 16px 12px;
+    padding: 10px 12px;
     text-align: center;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
-    font-size: 13px;
-    color: #6b6458;
+    font-size: 12.5px;
+    color: var(--ink);
+    background: #fff;
   }
-  .upload-box:hover {
+  .upload-btn:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
   }
-  .upload-box input { display: none; }
+  .upload-btn input { display: none; }
 
   .doc-list {
     list-style: none;
@@ -333,9 +335,9 @@
 
     <div class="kb-section">
       <h3>产品资料库</h3>
-      <label class="upload-box" id="uploadBox">
-        点击或拖拽上传 Word / PDF / Excel
-        <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm" multiple />
+      <label class="upload-btn" id="uploadBox">
+        + 上传资料(Word/PDF/Excel/PPT)
+        <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.pptx" multiple />
       </label>
       <div class="upload-status" id="uploadStatus"></div>
       <ul class="doc-list" id="docList"></ul>
@@ -359,7 +361,7 @@
       <div class="input-row">
         <label class="attach-btn" id="attachBtn" title="上传文案/素材稿到本次对话">
           📎
-          <input type="file" id="attachInput" accept=".pdf,.docx,.xlsx,.xlsm,.txt" style="display:none" />
+          <input type="file" id="attachInput" accept=".pdf,.docx,.xlsx,.xlsm,.pptx,.txt" style="display:none" />
         </label>
         <textarea id="messageInput" placeholder="输入你的需求…" rows="1"></textarea>
         <button class="send-btn" id="sendBtn">发送</button>
@@ -373,9 +375,10 @@
   </main>
 
 </div>
-
 <script>
-  const messageInput = document.getElementById('messageInput');
+const chatWindow = document.getElementById('chatWindow');
+const emptyState = document.getElementById('emptyState');
+const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const fileInput = document.getElementById('fileInput');
 const uploadStatus = document.getElementById('uploadStatus');
